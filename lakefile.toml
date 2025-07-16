@@ -1,0 +1,6 @@
+name = "ic"
+version = "0.1.0"
+defaultTargets = ["Ic"]
+
+[[lean_lib]]
+name = "Ic"
