@@ -28,6 +28,20 @@ deriving Repr
 
 def At (T : Type u) := T → Bool
 
+def eval (v : At T) : BExp T → Bool
+  | .zero => false
+  | .one => true
+  | .prim t => v t
+  | .and b c => eval v b && eval v c
+  | .or b c => eval v b || eval v c
+  | .not b => !(eval v b)
+
+def boolean_equivalence (b c : BExp T) :=
+  ∀ (v : At T), eval v b == eval v c
+
+instance : LE (BExp T) where
+  le (b c : BExp T) := boolean_equivalence (BExp.or b c) c
+
 inductive GuardedString (σ : Type u) (T : Type v)
   | final (state : At T) : GuardedString σ T
   | cons (state : At T) (action : σ) (next : GuardedString σ T) : GuardedString σ T
@@ -92,3 +106,37 @@ def coproduct (X : GCoalgebra σ T) (Y : GCoalgebra σ T) : GCoalgebra σ T :=
                 | 0 => 0
                 | 1 => 1
                 | .inr (a, b) => .inr (a, .inr b) ⟩
+
+
+def exp2coalgebra_aux : Exp σ T → ((X : GCoalgebra σ T) × (two ⊕ σ × X.states))
+  | .assert b =>
+    ⟨
+      ⟨Empty, fun _ ↦ 1⟩,
+      sorry
+    ⟩
+  | .do p =>
+    ⟨
+      ⟨ Unit, fun _ ↦ 1⟩,
+      .inr (p, ())
+    ⟩
+  | .if b f g =>
+    let ⟨F, i_f⟩ := exp2coalgebra_aux f
+    let ⟨G, i_g⟩ := exp2coalgebra_aux g
+    ⟨
+      coproduct F G,
+      sorry
+    ⟩
+  | .seq f g =>
+    let ⟨F, i_f⟩ := exp2coalgebra_aux f
+    let ⟨G, i_g⟩ := exp2coalgebra_aux g
+    let FG := coproduct F G
+    ⟨
+      sorry,
+      sorry
+    ⟩
+  | .while b f =>
+    let ⟨F, i_f⟩ := exp2coalgebra_aux f
+    ⟨
+      sorry,
+      sorry
+    ⟩
