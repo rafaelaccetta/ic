@@ -18,6 +18,12 @@ inductive BExp (T : Type v) : Type v
   | not : BExp T → BExp T
 deriving Repr
 
+instance : Zero (BExp T) where
+  zero := .zero
+
+instance : One (BExp T) where
+  one := .one
+
 inductive Exp (σ : Type u) (T : Type v) : Type (max u v)
   | do : σ → Exp σ T
   | assert : BExp T → Exp σ T
@@ -26,21 +32,16 @@ inductive Exp (σ : Type u) (T : Type v) : Type (max u v)
   | while : BExp T → Exp σ T → Exp σ T
 deriving Repr
 
-def At (T : Type u) := T → Bool
+def At (T : Type u) := T → Bool --!!!!!!!!!
 
 def eval (v : At T) : BExp T → Bool
-  | .zero => false
-  | .one => true
+  | 0 => False
+  | 1 => True
   | .prim t => v t
   | .and b c => eval v b && eval v c
   | .or b c => eval v b || eval v c
-  | .not b => !(eval v b)
+  | .not b =>  ! eval v b
 
-def boolean_equivalence (b c : BExp T) :=
-  ∀ (v : At T), eval v b == eval v c
-
-instance : LE (BExp T) where
-  le (b c : BExp T) := boolean_equivalence (BExp.or b c) c
 
 inductive GuardedString (σ : Type u) (T : Type v)
   | final (state : At T) : GuardedString σ T
@@ -84,18 +85,19 @@ instance : One (G σ T X) where
 
 
 def uniform_continuation (X : GCoalgebra σ T)
-  (Y : Set X.states) [DecidablePred (. ∈ Y)]
-  [DecidableEq X.states]
+  (Y : X.states → Bool)
   (h : G σ T X.states) : GCoalgebra σ T :=
   ⟨ X.states,
     fun x α ↦
-      if x ∈ Y ∧ (X.map x α) = 1
-      then h α
+      if Y x
+      then match X.map x α with
+      | 1 => h α
+      | _ => X.map x α
       else X.map x α ⟩
 
 
 
-def coproduct (X : GCoalgebra σ T) (Y : GCoalgebra σ T) : GCoalgebra σ T :=
+def coproduct (X Y : GCoalgebra σ T) : GCoalgebra σ T :=
   ⟨ (X.states ⊕ Y.states),
     fun z α ↦ match z with
     | .inl x => match (X.map x α) with
@@ -108,35 +110,92 @@ def coproduct (X : GCoalgebra σ T) (Y : GCoalgebra σ T) : GCoalgebra σ T :=
                 | .inr (a, b) => .inr (a, .inr b) ⟩
 
 
-def exp2coalgebra_aux : Exp σ T → ((X : GCoalgebra σ T) × (two ⊕ σ × X.states))
+def exp2coalgebra_aux : Exp σ T → ((X : GCoalgebra σ T) × G σ T X.states)--(two ⊕ σ × X.states))
   | .assert b =>
     ⟨
       ⟨Empty, fun _ ↦ 1⟩,
-      sorry
+      fun α ↦ if eval α b
+        then 1 else 0
     ⟩
   | .do p =>
     ⟨
       ⟨ Unit, fun _ ↦ 1⟩,
-      .inr (p, ())
+      fun _ ↦ .inr (p, ())
     ⟩
   | .if b f g =>
-    let ⟨F, i_f⟩ := exp2coalgebra_aux f
-    let ⟨G, i_g⟩ := exp2coalgebra_aux g
+    let ⟨cf, i_f⟩ := exp2coalgebra_aux f
+    let ⟨cg, i_g⟩ := exp2coalgebra_aux g
     ⟨
-      coproduct F G,
-      sorry
+      coproduct cf cg,
+      fun α ↦
+        if eval α b
+        then
+          match i_f α with
+          | 0 => 0
+          | 1 => 1
+          | .inr (a, b) => .inr (a, .inl b)
+        else
+          match i_g α with
+          | 0 => 0
+          | 1 => 1
+          | .inr (a, b) => .inr (a, .inr b)
     ⟩
   | .seq f g =>
-    let ⟨F, i_f⟩ := exp2coalgebra_aux f
-    let ⟨G, i_g⟩ := exp2coalgebra_aux g
-    let FG := coproduct F G
+    let ⟨cf, i_f⟩ := exp2coalgebra_aux f
+    let ⟨cg, i_g⟩ := exp2coalgebra_aux g
+    let i_e : G σ T (cf.states ⊕ cg.states) :=
+      fun α ↦
+        match i_f α with
+        | 1 => match i_g α with
+          | 0 => 0
+          | 1 => 1
+          | .inr (a, b) => .inr (a, .inr b)
+        | _ => match i_f α with
+          | 0 => 0
+          | 1 => 1
+          | .inr (a, b) => .inr (a, .inl b)
     ⟨
-      sorry,
-      sorry
+      uniform_continuation (coproduct cf cg)
+        Sum.isLeft
+        (fun α ↦ match i_g α with
+        | 0 => 0
+        | 1 => 1
+        | .inr (a, b) => .inr (a, .inr b)
+        ),
+        i_e
     ⟩
   | .while b f =>
-    let ⟨F, i_f⟩ := exp2coalgebra_aux f
+    let ⟨cf, i_f⟩ := exp2coalgebra_aux f
+    let i_e : G σ T cf.states :=
+      fun α ↦
+        if !(eval α b) then 1
+        else
+          match i_f α with
+          | 1 => 0
+          | _ => i_f α
     ⟨
-      sorry,
-      sorry
+      uniform_continuation cf
+        (fun _ ↦ true) i_e,
+      i_e
     ⟩
+
+def exp2automaton (e : Exp σ T) : GAutomaton σ T :=
+  let ⟨⟨s, m⟩, i_e⟩ := exp2coalgebra_aux e
+  ⟨
+    (Unit ⊕ s),
+    (fun st => match st with
+      | .inl () =>
+        fun α ↦
+        match i_e α with
+        | 0 => 0
+        | 1 => 1
+        | .inr (a, b) => .inr (a, .inr b)
+      | .inr a =>
+        fun α ↦
+        match m a α with
+        | 0 => 0
+        | 1 => 1
+        | .inr (a, b) => .inr (a, .inr b)
+        ),
+    .inl ()
+  ⟩
